@@ -1,0 +1,389 @@
+<!-- Polymer and Third Party Charts -->
+<link rel="import" href="../../bower_components/polymer/polymer.html">
+<script src="http://code.highcharts.com/highcharts.js"></script>
+
+<!-- Custom Elements that are dependant upon the my-highchart element -->
+<link rel="import" href="../my-highchart/elements/set-data.html">
+<link rel="import" href="../my-highchart/elements/pie-data.html">
+
+<script>
+  // Polymer shims Shadow DOM with Arrays I *believe*. But if that changes then any code treating shadow
+  // collections like arrays will go boom. I probably might extend these anyways, they're convenant.
+  if (!HTMLCollection.forEach) {
+    HTMLCollection.prototype.forEach = Array.prototype.forEach;}
+  if (!NodeList.forEach) {
+    NodeList.prototype.forEach = Array.prototype.forEach;}
+</script>
+
+
+<dom-module id="my-highchart">
+
+  <template>
+    <!-- I want to remain as un-opinionated towards style as possible. Follow a few common sense and best
+         practices, hide set-data. Highcharts builds the inside, and you (the dev) can build the outside. -->
+    <style>
+      :host {
+        font-size: 100%;
+        display: inline-block;
+      }
+      .light-wrapper > ::content set-data {
+        display: none;
+      }
+    </style>
+
+    <div class="chart-wrapper">
+      <div id="container">
+
+      </div>
+    </div>
+
+    <!-- Hidden content, user data added from user template [/index.html] -->
+    <div class="light-wrapper" id="light-dom">
+      <content></content>
+    </div>
+
+  </template>
+
+  <script>
+    var _xElemMyHighchartUtil_ = _xElemMyHighchartUtil_ || {
+          /**
+           * Get the mean from a group of sets of data
+           * @param Array sets - 2D Array where all Arrays can be used in basic matrix multiplication.
+           * @return Array - 1D Array to use as series.data in bar, column, spline, [single point x,y charts]
+           */
+          mean: function(sets) {
+            if (typeof sets !== "object" || sets.constructor !== Array)
+              c.e('_xElemMyHighchartUtil.mean expects Array as argument');
+
+            var i = 0, j = 0, data = [], nextNum, total, mean, len;
+
+            // Get the min len of all arrays
+            len = Math.min.apply(Array, sets.map(function(t){ return t.length;})) || 0;
+
+            for (; i < len; i++) {
+              total = 0;
+              j = 0;
+              for (j; j < sets.length; j++) {
+                nextNum = Number(sets[j][i]);
+                // TODO: Ensure there is a polyfil for Number.isNaN
+                if (!Number.isNaN(nextNum))  {
+                  total += nextNum;
+                }
+              }
+              mean = total/len;
+              data.push(mean);
+            }
+
+            return data;
+          }
+        };
+
+    var myHighcharts = Polymer({
+      is: "my-highchart",
+
+      properties: {
+        type: {
+          type: String,
+          value: "bar",
+          observer: '_typeChanged'
+        },
+        _series: {
+          type: Array,
+          observer: '_buildChart'
+        },
+
+        title: String,
+        width: Number,
+        height: Number,
+        yLabel: String,
+        xLabel: String,
+
+        categories: {
+          type: Array,
+          value: [],
+          notify: true,
+          reflectToAttribute: true
+        },
+        xMax: {
+          type: Number,
+          observer: '_buildChart'
+        },
+        yMax: {
+          type: Number,
+          observer: '_buildChart'
+        },
+        colors: Array,
+
+
+        _seriesVault: {
+          type: Object,
+          value: new WeakMap(),
+          reflectToAttribute: false,
+          notify: false
+        },
+        _lightDOM: {
+          type: Object,
+          value: this.$['light-dom'],
+          reflectToAttribute: false,
+          notify: false
+        }
+      },
+
+
+      listeners: {},
+
+      ready: function() {},
+
+      /**
+       * Chart Type Changed
+       * @param newType
+       * @param oldType
+       * @private
+       */
+      _typeChanged: function(newType, oldType) {
+        this.buildNewChart();
+      },
+
+      /**
+       * Render Chart
+       * @private
+       */
+      _buildChart: function() {
+        if (typeof this.get('_series') === "object" && this.get('_series').constructor === Array) {
+          this.buildNewChart();
+        }
+      },
+
+      /**
+       * Check for data and setup everything for initial rendering.
+       */
+      attached: function() {
+        this._lightDOM = Polymer.dom(this.root).querySelector('#light-dom');
+        var dataSets = this.get('_lightDOM').querySelectorAll('set-data'),
+            pieData = this.get('_lightDOM').querySelectorAll('pie-data'),
+            _this = this,
+            series = [];
+
+        if (this.type.toLowerCase() === "pie") {
+
+          // slices tracks when all promises return so we can build pie chart.
+          var slices = 0;
+          pieData.forEach(function(t, n, a) {
+            var polyPieData= t,
+                dataPie = polyPieData.data(c.l, c.e);
+            if (dataPie.constructor === Promise)
+              slices++;
+
+            dataPie.then(function(data) {
+
+              series.push(data);
+              _this._seriesVault.set(data._node, data);
+              slices--;
+              console.log('slices', slices)
+              if (slices === 0) {
+                _this._series = [{
+                  name: _this.name || '',
+                  data: series
+                }];
+                // all promises should be returned.
+                _this.buildNewChart();
+              }
+            });
+          });
+        }
+        // Not Pie Chart 'bar', 'column', 'spline'
+        else {
+          dataSets.forEach(function(t, n, a) {
+            var dataSet = {},
+                contentJSON;
+
+            dataSet.text = t.innerText || t.textContent || t.innerHTML;
+            dataSet.name = t.getAttribute('name') || '';
+            dataSet.type = t.getAttribute('type') || '';
+            dataSet.color = t.getAttribute('color') || '';
+
+            if (typeof dataSet.text !== "string" || dataSet.text === "") {
+              // Empty set of data, shame shame.
+              dataSet.data = [];
+            } else {
+              try {
+                contentJSON = JSON.parse(dataSet.text);
+                if (typeof contentJSON === "object" && contentJSON.constructor === Array) {
+                  dataSet.data = contentJSON;
+                }
+                else if (typeof contentJSON === "object" && contentJSON.constructor === Object) {
+                  // Typical data extraction
+                  dataSet.data = _this._getSeriesDataFromObject(contentJSON);
+                }
+                else {
+                  // JSON was not an Array
+                  dataSet.data = [];
+                }
+              }
+              catch(error) {
+                // We have no data!
+                console.error('<set-data> Could not use JSON @', contentJSON, t);
+              }
+            }
+
+            // Add the data set onto the to-be chart series array.
+            series.push(dataSet);
+
+            // Stored in a way that querySelector can accurately retrieve them.
+            _this._seriesVault.set(t, dataSet.data);
+          });
+
+
+          this._series = series;
+          this.buildNewChart();
+        }
+      },
+
+
+      buildNewChart: function() {
+        var _this = this;
+
+        var theChartObject = {
+          chart: {
+            type: this.type,
+          },
+          title: {
+            text: ''
+          },
+          xAxis: {
+            categories: this.categories,
+          },
+          yAxis: {},
+          series: this._series
+        };
+
+        // Main Title
+        if (typeof this.title === "string" || typeof this.title === "number")
+          theChartObject.title.text = this.get('title');
+
+        // Max number on axis. Automatically tries to figure it out if not set.
+        if (typeof this.xMax === "number" && this.xMax > 0)
+          theChartObject.xAxis.max = this.get('xMax');
+        if (typeof this.yMax === "number" && this.yMax > 0)
+          theChartObject.yAxis.max = this.get('yMax');
+        if (typeof this.width === "string" || typeof this.width === "number")
+          theChartObject.chart.width = this.width;
+        if (typeof this.height === "string" || typeof this.height === "number")
+          theChartObject.chart.height = this.height;
+
+        // Optional labels on axis [x-label="String"][y-label="String"]
+        ['xLabel', 'yLabel'].forEach(function(axisLabel, i, a) {
+          var axis = axisLabel.slice(0, 1);
+          if (typeof _this.get(axisLabel) === "string" || typeof _this.get(axisLabel) === "number" && _this.get(axisLabel) != '') {
+            if (typeof theChartObject[axis + 'Axis'].title !== "object") {
+              theChartObject[axis + 'Axis'].title = {};
+            }
+            theChartObject[axis + 'Axis'].title.text = _this.get(axisLabel).toString();
+          }
+        });
+
+
+        if (typeof this.get('categories') === "object" && this.get('categories').constructor === Array) {
+          if (this.type.toLowerCase() === 'bar')
+            theChartObject.xAxis.categories = this.get('categories');
+          else
+            theChartObject.yAxis.categories = this.get('categories');
+        }
+
+        // Build the chart on screen.
+        this._chart = $(Polymer.dom(this.root).querySelector('#container')).highcharts(theChartObject);
+
+        console.log(theChartObject);
+        /* This is for debugging only
+        if (!window.mine)
+          window.mine = [];
+        window.mine.push(this);
+        */
+      }
+    });
+
+
+    myHighcharts.prototype._util = _xElemMyHighchartUtil_;
+
+    myHighcharts.prototype._getSeriesDataFromObject = function _getSeriesDataFromObject(dataObject) {
+      if (typeof dataObject !== "object") {
+        console.error('_getSeriesDataFromObject expected object, '+ (typeof dataObject) +' was passed passed.');
+      }
+      var dataSet = [],
+          _this = this,
+          option,
+          setElms,
+          sets;
+
+      for (option in dataObject) {
+        if (!dataObject.hasOwnProperty(option))
+          continue;
+
+        switch (option) {
+          case 'mean':
+            if (typeof dataObject[option] === "object" && dataObject[option].constructor === Array) {
+              return this._util.mean(dataObject[option]);
+            }
+            else if (typeof dataObject[option] === "string") {
+              setElms = this.$['light-dom'].querySelectorAll(dataObject[option]);
+              sets = [];
+              setElms.forEach(function(elem, n, a) {
+                var dataSet = _this._seriesVault.get(elem);
+                if (typeof dataSet === "object" && dataSet.constructor === Array) {
+                  sets.push(dataSet);
+                }
+              });
+              var calulatedData = this._util.mean(sets);
+              return calulatedData;
+            }
+          default:
+            return dataObject;
+        }
+      }
+
+
+    };
+
+
+    /**
+     * Theming
+     */
+    Highcharts.theme = {
+      colors: ['#00a878', '#f5e0b7', '#654236', '#fe5e41', '#d6ba73'  ,'#AD866A', '#5291F5', '#6B5CA5', '#63C132', 'F5BB00'],
+      chart: {
+        backgroundColor: {
+          linearGradient: [10, 150, 500, 500],
+          stops: [
+            [0, 'rgb(248, 252, 249)'],
+            [1, 'rgb(236, 236, 238)']
+          ]
+        },
+      },
+      title: {
+        style: {
+          color: '#000',
+          font: 'bold 16px "Trebuchet MS", Verdana, sans-serif'
+        }
+      },
+      subtitle: {
+        style: {
+          color: '#666666',
+          font: 'bold 12px "Trebuchet MS", Verdana, sans-serif'
+        }
+      },
+
+      legend: {
+        itemStyle: {
+          font: '9pt Trebuchet MS, Verdana, sans-serif',
+          color: 'black'
+        },
+        itemHoverStyle:{
+          color: 'gray'
+        }
+      }
+    };
+
+    // Apply the theme
+    Highcharts.setOptions(Highcharts.theme);
+  </script>
+</dom-module>

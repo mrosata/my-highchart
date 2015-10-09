@@ -1,0 +1,68 @@
+<link rel="import" href="/bower_components/polymer/polymer.html">
+
+
+<dom-module id="pie-data">
+
+  <!-- This is your template! -->
+  <template>
+    <style></style>
+
+  </template>
+
+  <script>
+    //var myElement = 
+    var setData = Polymer({
+      is: 'pie-data',
+
+      properties: {
+        name: String,
+        y: Number,
+        selected: Boolean,
+        sliced: Boolean,
+        promises: {
+          type: Array,
+          value: []}
+      },
+
+      observers: ['getSliceData(name, y, selected, sliced)'],
+
+
+      data: function(resolve, reject) {
+
+        var _promises = this.get('promises'),
+            prom;
+
+        prom = new Promise(function(resolve, reject) {
+          // When pie data is set, the resolve will be called. Only 1 per element tho.
+          _promises.push([resolve, reject]);
+        });
+
+        return prom;
+      },
+
+      attached: function() {
+        this.getSliceData();
+      },
+
+      getSliceData: function() {
+        var data = {};
+        if (!!this.name)
+          data.name = this.name;
+        if (this.y !== "undefined")
+          data.y = this.y;
+        if (typeof this.sliced === "boolean")
+          data.sliced = this.sliced;
+        if (typeof this.selected === "boolean")
+          data.selected = this.selected;
+
+        data._node = this;
+        //this.data = data;
+        if (this.promises.length) {
+          //TODO: hopefully this isn't a problem being too generic
+          // Send data to any promise waiting.
+          this.promises.shift()[0](data);
+        }
+      }
+    });
+  </script>
+</dom-module>
